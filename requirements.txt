@@ -1,0 +1,12 @@
+ultralytics
+supervision
+fastapi
+uvicorn
+PyYAML
+numpy
+opencv-python
+tensorboard
+gdown
+torchreid
+ac
+aiortc

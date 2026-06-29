@@ -1,0 +1,21 @@
+model:
+  engine_path: "weights/yolov8n.engine"
+  confidence_threshold: 0.30
+
+analytics:
+  target_color: "red"
+
+# Full path to ffmpeg.exe. Leave as "ffmpeg" if it is on your system PATH.
+# Example: "C:/Users/vipul/Downloads/ffmpeg-7.1-full_build/bin/ffmpeg.exe"
+ffmpeg_path: "ffmpeg"
+
+cameras:
+  - id: 1
+    name: "Camera Feed 1"
+    rtsp_url: "rtsp://localhost:8554/cam1"
+    line_zone: [[100, 500], [800, 500]]
+
+  - id: 2
+    name: "Camera Feed 2"
+    rtsp_url: "rtsp://localhost:8554/cam2"
+    line_zone: [[200, 600], [1000, 600]]
