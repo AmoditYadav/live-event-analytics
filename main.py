@@ -30,6 +30,19 @@ if not hasattr(np, 'long'):
 warnings.filterwarnings("ignore", category=FutureWarning, module="supervision")
 
 global_dashboard_canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
+ffmpeg_process_lock = threading.Lock()
+current_ffmpeg_process = None
+
+
+def make_status_canvas(lines, size=(1280, 720)):
+    canvas = np.zeros((size[1], size[0], 3), dtype=np.uint8)
+    cv2.putText(canvas, "LIVE EVENT ANALYTICS", (40, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (56, 189, 248), 3)
+    y = 145
+    for line in lines:
+        cv2.putText(canvas, str(line), (40, y), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (230, 240, 255), 2)
+        y += 45
+    cv2.putText(canvas, time.strftime("%Y-%m-%d %H:%M:%S"), (40, 680), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (140, 155, 190), 2)
+    return canvas
 
 def create_dashboard_collage(frames, target_size=(640, 360)):
     canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
@@ -108,16 +121,46 @@ def make_ffmpeg_process(ffmpeg_exe: str, use_nvenc: bool) -> subprocess.Popen:
     ]
     return subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
-def stream_pusher(ffmpeg_proc):
+def set_ffmpeg_process(proc):
+    global current_ffmpeg_process
+    with ffmpeg_process_lock:
+        current_ffmpeg_process = proc
+
+
+def get_ffmpeg_process():
+    with ffmpeg_process_lock:
+        return current_ffmpeg_process
+
+
+def ffmpeg_stderr_logger(proc):
+    try:
+        for raw_line in iter(proc.stderr.readline, b""):
+            line = raw_line.decode(errors="replace").strip()
+            if line:
+                print(f"[ffmpeg] {line}")
+    except Exception as exc:
+        print(f"[ffmpeg] stderr logger stopped: {exc}")
+
+
+def stream_pusher():
     global global_dashboard_canvas
     while True:
-        if ffmpeg_proc.poll() is None:
-            ffmpeg_proc.stdin.write(global_dashboard_canvas.tobytes())
-            ffmpeg_proc.stdin.flush()
+        ffmpeg_proc = get_ffmpeg_process()
+        if ffmpeg_proc is not None and ffmpeg_proc.poll() is None and ffmpeg_proc.stdin:
+            try:
+                ffmpeg_proc.stdin.write(global_dashboard_canvas.tobytes())
+                ffmpeg_proc.stdin.flush()
+            except (BrokenPipeError, OSError, ValueError) as exc:
+                print(f"[pipeline] FFmpeg stdin unavailable: {exc}")
         time.sleep(1.0 / 30.0)
 
 def orchestrator_loop(loop):
     global global_dashboard_canvas
+    global_dashboard_canvas = make_status_canvas([
+        "Starting pipeline...",
+        "Waiting for camera frames and MediaMTX.",
+        "If this remains visible, verify RTSP inputs in config/config.yaml.",
+    ])
     csv_filename = f"analytics_export_{int(time.time())}.csv"
     if not os.path.exists(csv_filename):
         with open(csv_filename, "w", newline="") as f:
@@ -153,15 +196,24 @@ def orchestrator_loop(loop):
     last_known_frames = {}
     
     ffmpeg_process = make_ffmpeg_process(ffmpeg_exe, use_nvenc)
+    set_ffmpeg_process(ffmpeg_process)
     print(f"[pipeline] FFmpeg PID {ffmpeg_process.pid} -> rtsp://localhost:8554/dashboard")
-    
-    threading.Thread(target=stream_pusher, args=(ffmpeg_process,), daemon=True).start()
+    threading.Thread(target=ffmpeg_stderr_logger, args=(ffmpeg_process,), daemon=True).start()
+    threading.Thread(target=stream_pusher, daemon=True).start()
     
     print("[pipeline] Waiting for MediaMTX WHEP stream to become available...")
     while True:
-        resp = requests.get("http://localhost:8889/dashboard")
-        if resp.status_code == 200:
-            break
+        try:
+            resp = requests.get("http://localhost:8889/dashboard", timeout=2)
+            if resp.status_code == 200:
+                break
+        except requests.RequestException:
+            pass
+        if ffmpeg_process.poll() is not None:
+            print("[pipeline] FFmpeg exited before MediaMTX became ready - restarting...")
+            ffmpeg_process = make_ffmpeg_process(ffmpeg_exe, use_nvenc)
+            set_ffmpeg_process(ffmpeg_process)
+            threading.Thread(target=ffmpeg_stderr_logger, args=(ffmpeg_process,), daemon=True).start()
         time.sleep(1)
     
     print("[pipeline] RTSP stream primed - dashboard path is live on MediaMTX")
@@ -174,7 +226,8 @@ def orchestrator_loop(loop):
         if ffmpeg_process.poll() is not None:
             print("[pipeline] FFmpeg died - restarting...")
             ffmpeg_process = make_ffmpeg_process(ffmpeg_exe, use_nvenc)
-            threading.Thread(target=stream_pusher, args=(ffmpeg_process,), daemon=True).start()
+            set_ffmpeg_process(ffmpeg_process)
+            threading.Thread(target=ffmpeg_stderr_logger, args=(ffmpeg_process,), daemon=True).start()
         
         frames_dict = camera_reader.read()
         for cam_id, frame in frames_dict.items():
@@ -215,6 +268,12 @@ def orchestrator_loop(loop):
             
             if annotated_frames:
                 global_dashboard_canvas = create_dashboard_collage(annotated_frames)
+        else:
+            global_dashboard_canvas = make_status_canvas([
+                "No camera frames received yet.",
+                "Telemetry WebSocket may connect even when video inputs are unavailable.",
+                "Check MediaMTX paths: rtsp://localhost:8554/cam1 and /cam2.",
+            ])
             
             loop_times.append(time.time() - loop_start)
             if len(loop_times) > 30:
