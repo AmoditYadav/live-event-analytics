@@ -1,5 +1,5 @@
 import os
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|allowed_extensions;ALL|reconnect;1|reconnect_streamed;1|reconnect_delay_max;5"
 
 import asyncio
 import cv2
@@ -144,7 +144,7 @@ def orchestrator_loop(loop):
     print(f"[pipeline] ffmpeg: {ffmpeg_exe}")
     print(f"[pipeline] video encoder: {encoder_name}")
     
-    model_path = "yolov8m.engine" if os.path.exists("yolov8m.engine") else "yolov8m.pt"
+    model_path = "weights/yolov8n.engine" if os.path.exists("weights/yolov8n.engine") else ("weights/yolov8n.onnx" if os.path.exists("weights/yolov8n.onnx") else "yolov8n.pt")
     print(f"[pipeline] Loading YOLO model: {model_path} ...")
     detector = YOLODetector(model_path)
     print("[pipeline] YOLO ready.")
