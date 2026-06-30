@@ -13,3 +13,4 @@ aiortc
 streamlink
 requests
 yt-dlp
+quickjs

@@ -1,6 +1,5 @@
 import os
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|allowed_extensions;ALL|reconnect;1|reconnect_streamed;1|reconnect_delay_max;5"
-
 import asyncio
 import cv2
 import json
@@ -9,15 +8,13 @@ import uvicorn
 import numpy as np
 import time
 import csv
-import subprocess
-import shutil
 import requests
 import threading
 from contextlib import asynccontextmanager
 import supervision as sv
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 import warnings
-import imageio_ffmpeg
+
 from core.video_stream import MultiCameraReader
 from core.detector import YOLODetector
 from core.tracker import EventTracker
@@ -59,69 +56,6 @@ def create_dashboard_collage(frames, target_size=(640, 360)):
     return canvas
 
 
-def resolve_ffmpeg(config_path: str) -> str:
-    if config_path and config_path != "ffmpeg" and os.path.isfile(config_path):
-        return config_path
-    bundled = imageio_ffmpeg.get_ffmpeg_exe()
-    if bundled and os.path.isfile(bundled):
-        return bundled
-    found = shutil.which("ffmpeg")
-    if found:
-        return found
-    candidates = [
-        r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
-        r"C:\ffmpeg\bin\ffmpeg.exe",
-    ]
-    for c in candidates:
-        if os.path.isfile(c):
-            return c
-    return "ffmpeg"
-
-def probe_nvenc(ffmpeg_exe: str) -> bool:
-    black = bytes(320 * 240 * 3)
-    test = subprocess.run(
-        [
-            ffmpeg_exe, "-y",
-            "-f", "rawvideo", "-vcodec", "rawvideo", "-pix_fmt", "bgr24",
-            "-s", "320x240", "-r", "30", "-i", "-",
-            "-c:v", "h264_nvenc", "-preset", "p1", "-frames:v", "1",
-            "-f", "null", "-",
-        ],
-        input=black,
-        capture_output=True,
-        timeout=10,
-    )
-    return test.returncode == 0
-
-def make_ffmpeg_process(ffmpeg_exe: str, use_nvenc: bool) -> subprocess.Popen:
-    video_codec_args = (
-        ["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ull", "-profile:v", "baseline", "-pix_fmt", "yuv420p", "-b:v", "5M"]
-        if use_nvenc
-        else ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-profile:v", "baseline", "-pix_fmt", "yuv420p", "-b:v", "5M"]
-    )
-    cmd = [
-        ffmpeg_exe,
-        "-y",
-        "-f", "rawvideo",
-        "-vcodec", "rawvideo",
-        "-pix_fmt", "bgr24",
-        "-s", "1280x720",
-        "-r", "30",
-        "-i", "-",
-        *video_codec_args,
-        "-f", "rtsp",
-        "rtsp://localhost:8554/dashboard",
-    ]
-    return subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
-
-def stream_pusher(ffmpeg_proc):
-    global global_dashboard_canvas
-    while True:
-        if ffmpeg_proc.poll() is None:
-            ffmpeg_proc.stdin.write(global_dashboard_canvas.tobytes())
-            ffmpeg_proc.stdin.flush()
-        time.sleep(1.0 / 30.0)
-
 def orchestrator_loop(loop):
     global global_dashboard_canvas
     csv_filename = f"analytics_export_{int(time.time())}.csv"
@@ -138,11 +72,7 @@ def orchestrator_loop(loop):
     
     camera_configs = config.get("cameras", [])
     
-    ffmpeg_exe = resolve_ffmpeg(config.get("ffmpeg_path", "ffmpeg"))
-    use_nvenc = probe_nvenc(ffmpeg_exe)
-    encoder_name = "h264_nvenc" if use_nvenc else "libx264"
-    print(f"[pipeline] ffmpeg: {ffmpeg_exe}")
-    print(f"[pipeline] video encoder: {encoder_name}")
+
     
     model_path = "weights/yolov8n.engine" if os.path.exists("weights/yolov8n.engine") else ("weights/yolov8n.onnx" if os.path.exists("weights/yolov8n.onnx") else "yolov8n.pt")
     print(f"[pipeline] Loading YOLO model: {model_path} ...")
@@ -158,7 +88,7 @@ def orchestrator_loop(loop):
     box_annotator = sv.BoxAnnotator(thickness=2)
     last_known_frames = {}
     
-    print("[pipeline] RTSP stream bypassed - UI will use direct MJPEG")
+
     
     global_stats = {"total_occupancy": 0, "fps": 0.0, "chokepoint_footfall": 0, "total_identified": 0}
     
@@ -238,20 +168,17 @@ def orchestrator_loop(loop):
         sleep_time = max(0.001, (1.0 / 30.0) - elapsed)
         time.sleep(sleep_time)
 
-from fastapi.responses import StreamingResponse
 
-async def video_stream_generator():
+
+
+@app.websocket("/ws/video")
+async def websocket_video(websocket: WebSocket):
+    await websocket.accept()
     while True:
-        ret, buffer = cv2.imencode('.jpg', global_dashboard_canvas)
-        if ret:
-            frame_bytes = buffer.tobytes()
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        await asyncio.sleep(1/30.0)
-
-@app.get("/video_feed")
-async def video_feed():
-    return StreamingResponse(video_stream_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
+        await asyncio.sleep(0.016)
+        if global_dashboard_canvas is not None:
+            _, buffer = cv2.imencode('.jpg', global_dashboard_canvas, [cv2.IMWRITE_JPEG_QUALITY, 50])
+            await websocket.send_bytes(buffer.tobytes())
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

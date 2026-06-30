@@ -473,7 +473,7 @@
             </div>
 
             <div class="video-wrap">
-                <img id="main-video" src="/video_feed" style="width: 100%; height: 100%; object-fit: contain; background: #000; border-radius: 6px;">
+                <img id="videoFeed" style="width: 100%; height: auto; min-height: 720px; object-fit: contain; border: none; background-color: #000;">
 
                 <div class="video-overlay-tl" id="video-timestamp">--:--:--</div>
                 <div class="video-overlay-tr">CAM 1–2 · Direct MJPEG</div>
@@ -575,7 +575,13 @@
     updateClock();
     setInterval(updateClock, 1000);
 
-    // Video feed is now handled automatically by the <img src="/video_feed"> tag above.
-</script>
+    const videoFeed = document.getElementById('videoFeed');
+    const wsVideo = new WebSocket('ws://' + window.location.host + '/ws/video');
+    wsVideo.binaryType = 'blob';
+    wsVideo.onmessage = function(event) {
+        const url = URL.createObjectURL(event.data);
+        videoFeed.src = url;
+        videoFeed.onload = () => URL.revokeObjectURL(url);
+    };</script>
 </body>
 </html>
