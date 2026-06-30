@@ -10,6 +10,7 @@ import queue
 import multiprocessing as mp
 import asyncio
 import json
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -157,7 +158,6 @@ def camera_worker(cam_id, url, out_queue, evt_shutdown):
     if model_path.endswith(".pt"):
         model.to("cuda")
         
-    tracker = SimpleTracker()
     class_names = model.names
     
     while not evt_shutdown.is_set():
@@ -188,54 +188,103 @@ def camera_worker(cam_id, url, out_queue, evt_shutdown):
                         if class_name == "person":
                             detections.append([x1, y1, x2, y2, confidence, class_id, class_name])
                         
-            confirmed_tracks = tracker.update(detections)
             try:
-                out_queue.put((frame, confirmed_tracks), timeout=0.1)
+                out_queue.put((frame, detections), timeout=0.1)
             except queue.Full:
                 pass
         else:
             cap = None
             time.sleep(1)
 
-def get_track_color_label(frame, track):
+def normalize_lighting(crop):
+    lab = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+    cl = clahe.apply(l)
+    limg = cv2.merge((cl, a, b))
+    return cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+
+def remove_skin(crop):
+    ycrcb = cv2.cvtColor(crop, cv2.COLOR_BGR2YCrCb)
+    lower = np.array([0, 133, 77], dtype=np.uint8)
+    upper = np.array([255, 173, 127], dtype=np.uint8)
+    skin_mask = cv2.inRange(ycrcb, lower, upper)
+    return cv2.bitwise_not(skin_mask)
+
+def classify_color(h, s, v):
+    if v < 40: return "black"
+    if v > 200 and s < 40: return "white"
+    if s < 40 and 40 <= v <= 200: return "grey"
+    
+    if 10 <= h <= 30 and 50 <= s <= 200 and 40 <= v < 150: return "brown"
+    
+    if h < 7 or h >= 170: return "red"
+    if h < 22: return "orange"
+    if h < 35: return "yellow"
+    if h < 85: return "green"
+    if h < 100: return "cyan"
+    if h < 135: return "blue"
+    if h < 160: return "purple"
+    return "pink"
+
+def get_track_color_data(frame, track):
     x1, y1, x2, y2 = map(int, track['bbox'])
-    y_start = max(0, int(y1 + (y2 - y1) * 0.2))
-    y_end = min(frame.shape[0], int(y1 + (y2 - y1) * 0.6))
-    x_start = max(0, int(x1 + (x2 - x1) * 0.25))
-    x_end = min(frame.shape[1], int(x2 - (x2 - x1) * 0.25))
+    
+    h_box = y2 - y1
+    w_box = x2 - x1
+    y_start = max(0, int(y1 + h_box * 0.22))
+    y_end = min(frame.shape[0], int(y1 + h_box * 0.58))
+    x_start = max(0, int(x1 + w_box * 0.30))
+    x_end = min(frame.shape[1], int(x2 - w_box * 0.30))
     
     crop = frame[y_start:y_end, x_start:x_end]
-    if crop.size == 0:
-        return "unknown"
+    if crop.size == 0 or crop.shape[0] < 2 or crop.shape[1] < 2:
+        return "unknown", 0.0
         
-    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-    h, s, v = cv2.split(hsv)
+    crop_norm = normalize_lighting(crop)
+    non_skin_mask = remove_skin(crop_norm)
     
-    mean_v = np.mean(v)
-    mean_s = np.mean(s)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    non_skin_mask = cv2.morphologyEx(non_skin_mask, cv2.MORPH_OPEN, kernel)
+    non_skin_mask = cv2.morphologyEx(non_skin_mask, cv2.MORPH_CLOSE, kernel)
     
-    if mean_v < 40: return "black"
-    if mean_v > 210 and mean_s < 40: return "white"
-    if mean_s < 40: return "grey"
+    valid_pixels = crop_norm[non_skin_mask == 255]
+    if len(valid_pixels) < 10:
+        return "unknown", 0.0
+        
+    pixels = np.float32(valid_pixels)
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
     
-    mask = cv2.inRange(hsv, np.array([0, 40, 40]), np.array([180, 255, 255]))
-    hist = cv2.calcHist([hsv], [0], mask, [180], [0, 180])
-    if hist.max() == 0: return "unknown"
+    k = min(3, len(pixels))
+    _, labels, centers = cv2.kmeans(pixels, k, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
     
-    hue = np.argmax(hist)
-    if hue < 10 or hue >= 170: return "red"
-    if hue < 25: return "orange"
-    if hue < 35: return "yellow"
-    if hue < 75: return "green"
-    if hue < 95: return "cyan"
-    if hue < 130: return "blue"
-    if hue < 160: return "purple"
-    return "pink"
+    counts = np.bincount(labels.flatten())
+    largest_cluster_idx = np.argmax(counts)
+    dominant_bgr = centers[largest_cluster_idx]
+    
+    cluster_ratio = counts[largest_cluster_idx] / len(pixels)
+    valid_ratio = len(pixels) / (crop.shape[0] * crop.shape[1])
+    
+    dominant_bgr_img = np.uint8([[dominant_bgr]])
+    dominant_hsv = cv2.cvtColor(dominant_bgr_img, cv2.COLOR_BGR2HSV)[0][0]
+    h, s, v = dominant_hsv
+    
+    color_name = classify_color(h, s, v)
+    
+    saturation_score = (s / 255.0) if color_name not in ["black", "white", "grey"] else 1.0
+    confidence = (cluster_ratio * 0.5) + (valid_ratio * 0.3) + (saturation_score * 0.2)
+    confidence = float(np.clip(confidence, 0.0, 1.0))
+    
+    return color_name, confidence
 
 def renderer_worker():
     last_frames = {}
     last_stats = {}
     unique_ids = set()
+    
+    trackers = {}
+    color_memory = {}
+    frame_counts = defaultdict(int)
     
     target_fps = 30
     frame_duration = 1.0 / target_fps
@@ -247,21 +296,48 @@ def renderer_worker():
             current_target = telemetry.target_color
             
         for cam_id, q in camera_pipes.items():
+            if cam_id not in trackers:
+                trackers[cam_id] = SimpleTracker()
+                
             try:
-                frame, tracks = q.get_nowait()
+                frame, detections = q.get_nowait()
                 annotated_frame = frame.copy()
+                
+                tracks = trackers[cam_id].update(detections)
                 
                 cam_occupancy = 0
                 cam_target_count = 0
+                frame_counts[cam_id] += 1
                 
                 for track in tracks:
                     tid = track['id']
                     unique_ids.add(tid)
                     cam_occupancy += 1
                     
-                    detected_color = get_track_color_label(frame, track)
+                    if tid not in color_memory:
+                        color_memory[tid] = {"history": [], "last_update": -5, "stable_color": "unknown"}
+                        
+                    if frame_counts[cam_id] - color_memory[tid]["last_update"] >= 5:
+                        color_name, conf = get_track_color_data(frame, track)
+                        if color_name != "unknown":
+                            history = color_memory[tid]["history"]
+                            history.append((color_name, conf, time.time()))
+                            if len(history) > 15:
+                                history.pop(0)
+                                
+                            color_scores = defaultdict(float)
+                            for c_name, c_conf, _ in history:
+                                color_scores[c_name] += c_conf
+                            
+                            if color_scores:
+                                best_color = max(color_scores.items(), key=lambda x: x[1])[0]
+                                color_memory[tid]["stable_color"] = best_color
+                                
+                        color_memory[tid]["last_update"] = frame_counts[cam_id]
+                        
+                    stable_color = color_memory[tid]["stable_color"]
                     
-                    if current_target != "all" and detected_color != current_target:
+                    if current_target != "all" and stable_color != current_target:
                         continue
                         
                     cam_target_count += 1
@@ -272,7 +348,7 @@ def renderer_worker():
                     np.random.seed(tid)
                     color = tuple(map(int, np.random.randint(0, 255, 3)))
                     cv2.rectangle(annotated_frame, (tx1, ty1), (tx2, ty2), color, 2)
-                    label = f"{tname} #{tid} ({detected_color})"
+                    label = f"{tname} #{tid} ({stable_color})"
                     label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
                     cv2.rectangle(annotated_frame, (tx1, ty1 - label_size[1] - 10), (tx1 + label_size[0], ty1), color, -1)
                     cv2.putText(annotated_frame, label, (tx1, ty1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
