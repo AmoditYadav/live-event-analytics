@@ -9,6 +9,7 @@ import time
 import queue
 import multiprocessing as mp
 import asyncio
+import json
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -20,17 +21,20 @@ import yaml
 app = FastAPI()
 encoder_pool = ThreadPoolExecutor(max_workers=4)
 
-# Multi-processing Queues for high-speed frame transfer
-capture_queue = mp.Queue(maxsize=5)
-detection_queue = queue.Queue(maxsize=5)
+camera_pipes = {}
 rendering_queue = queue.Queue(maxsize=5)
 shutdown_event = mp.Event()
 
-global_telemetry = {
-    "unique_count": 0,
-    "fps": 30.0,
-    "total_occupancy": 0
-}
+class TelemetryState:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.unique_count = 0
+        self.total_occupancy = 0
+        self.fps = 30.0
+        self.target_color = "all"
+        self.target_color_count = 0
+
+telemetry = TelemetryState()
 
 class SimpleTracker:
     def __init__(self, max_age=30, min_hits=3, iou_threshold=0.3):
@@ -140,13 +144,22 @@ def create_dashboard_collage(annotated_frames):
         
     return canvas
 
-def producer_worker(cam_id, url, q_capture, evt_shutdown):
+def camera_worker(cam_id, url, out_queue, evt_shutdown):
     ydl_opts = {
         'format': 'best[height<=720]', 
         'quiet': True,
         'extractor_args': {'youtube': ['player_client=ios']}
     }
     cap = None
+    
+    model_path = "weights/yolov8n.engine" if os.path.exists("weights/yolov8n.engine") else ("weights/yolov8n.onnx" if os.path.exists("weights/yolov8n.onnx") else "yolov8n.pt")
+    model = YOLO(model_path, task="detect")
+    if model_path.endswith(".pt"):
+        model.to("cuda")
+        
+    tracker = SimpleTracker()
+    class_names = model.names
+    
     while not evt_shutdown.is_set():
         if cap is None:
             try:
@@ -161,26 +174,6 @@ def producer_worker(cam_id, url, q_capture, evt_shutdown):
                 
         ret, frame = cap.read()
         if ret:
-            try:
-                q_capture.put((cam_id, frame), timeout=0.1)
-            except queue.Full:
-                pass
-        else:
-            cap = None
-            time.sleep(1)
-
-def processor_worker(camera_configs):
-    model_path = "weights/yolov8n.engine" if os.path.exists("weights/yolov8n.engine") else ("weights/yolov8n.onnx" if os.path.exists("weights/yolov8n.onnx") else "yolov8n.pt")
-    model = YOLO(model_path, task="detect")
-    if model_path.endswith(".pt"):
-        model.to("cuda")
-        
-    trackers = {cfg['id']: SimpleTracker() for cfg in camera_configs}
-    class_names = model.names
-    
-    while not shutdown_event.is_set():
-        try:
-            cam_id, frame = capture_queue.get(timeout=1)
             results = model(frame, conf=0.4, verbose=False)
             
             detections = []
@@ -192,16 +185,56 @@ def processor_worker(camera_configs):
                         confidence = float(box.conf[0].cpu().numpy())
                         class_id = int(box.cls[0].cpu().numpy())
                         class_name = class_names[class_id]
-                        detections.append([x1, y1, x2, y2, confidence, class_id, class_name])
+                        if class_name == "person":
+                            detections.append([x1, y1, x2, y2, confidence, class_id, class_name])
                         
-            confirmed_tracks = trackers[cam_id].update(detections)
-            detection_queue.put((cam_id, frame, confirmed_tracks))
-        except queue.Empty:
-            continue
+            confirmed_tracks = tracker.update(detections)
+            try:
+                out_queue.put((frame, confirmed_tracks), timeout=0.1)
+            except queue.Full:
+                pass
+        else:
+            cap = None
+            time.sleep(1)
+
+def get_track_color_label(frame, track):
+    x1, y1, x2, y2 = map(int, track['bbox'])
+    y_start = max(0, int(y1 + (y2 - y1) * 0.2))
+    y_end = min(frame.shape[0], int(y1 + (y2 - y1) * 0.6))
+    x_start = max(0, int(x1 + (x2 - x1) * 0.25))
+    x_end = min(frame.shape[1], int(x2 - (x2 - x1) * 0.25))
+    
+    crop = frame[y_start:y_end, x_start:x_end]
+    if crop.size == 0:
+        return "unknown"
+        
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    h, s, v = cv2.split(hsv)
+    
+    mean_v = np.mean(v)
+    mean_s = np.mean(s)
+    
+    if mean_v < 40: return "black"
+    if mean_v > 210 and mean_s < 40: return "white"
+    if mean_s < 40: return "grey"
+    
+    mask = cv2.inRange(hsv, np.array([0, 40, 40]), np.array([180, 255, 255]))
+    hist = cv2.calcHist([hsv], [0], mask, [180], [0, 180])
+    if hist.max() == 0: return "unknown"
+    
+    hue = np.argmax(hist)
+    if hue < 10 or hue >= 170: return "red"
+    if hue < 25: return "orange"
+    if hue < 35: return "yellow"
+    if hue < 75: return "green"
+    if hue < 95: return "cyan"
+    if hue < 130: return "blue"
+    if hue < 160: return "purple"
+    return "pink"
 
 def renderer_worker():
-    global global_telemetry
     last_frames = {}
+    last_stats = {}
     unique_ids = set()
     
     target_fps = 30
@@ -210,43 +243,64 @@ def renderer_worker():
     while not shutdown_event.is_set():
         loop_start = time.time()
         
-        try:
-            cam_id, frame, tracks = detection_queue.get_nowait()
-            annotated_frame = frame.copy()
+        with telemetry.lock:
+            current_target = telemetry.target_color
             
-            for track in tracks:
-                tx1, ty1, tx2, ty2 = map(int, track['bbox'])
-                tid = track['id']
-                tname = track['class_name']
-                tconf = track['confidence']
+        for cam_id, q in camera_pipes.items():
+            try:
+                frame, tracks = q.get_nowait()
+                annotated_frame = frame.copy()
                 
-                unique_ids.add(tid)
+                cam_occupancy = 0
+                cam_target_count = 0
                 
-                np.random.seed(tid)
-                color = tuple(map(int, np.random.randint(0, 255, 3)))
-                cv2.rectangle(annotated_frame, (tx1, ty1), (tx2, ty2), color, 2)
-                label = f"{tname} #{tid} ({tconf:.2f})"
-                label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-                cv2.rectangle(annotated_frame, (tx1, ty1 - label_size[1] - 10), (tx1 + label_size[0], ty1), color, -1)
-                cv2.putText(annotated_frame, label, (tx1, ty1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                for track in tracks:
+                    tid = track['id']
+                    unique_ids.add(tid)
+                    cam_occupancy += 1
+                    
+                    detected_color = get_track_color_label(frame, track)
+                    
+                    if current_target != "all" and detected_color != current_target:
+                        continue
+                        
+                    cam_target_count += 1
+                    
+                    tx1, ty1, tx2, ty2 = map(int, track['bbox'])
+                    tname = track['class_name']
+                    
+                    np.random.seed(tid)
+                    color = tuple(map(int, np.random.randint(0, 255, 3)))
+                    cv2.rectangle(annotated_frame, (tx1, ty1), (tx2, ty2), color, 2)
+                    label = f"{tname} #{tid} ({detected_color})"
+                    label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+                    cv2.rectangle(annotated_frame, (tx1, ty1 - label_size[1] - 10), (tx1 + label_size[0], ty1), color, -1)
+                    cv2.putText(annotated_frame, label, (tx1, ty1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                    
+                last_frames[cam_id] = annotated_frame
+                last_stats[cam_id] = (cam_occupancy, cam_target_count)
+            except queue.Empty:
+                pass
                 
-            last_frames[cam_id] = annotated_frame
-            global_telemetry["total_occupancy"] = len(tracks)
-        except queue.Empty:
-            pass
+        total_occupancy = sum(s[0] for s in last_stats.values())
+        total_target_count = sum(s[1] for s in last_stats.values())
+        
+        with telemetry.lock:
+            telemetry.total_occupancy = total_occupancy
+            telemetry.unique_count = len(unique_ids)
+            telemetry.target_color_count = total_target_count if current_target != "all" else total_occupancy
             
         if last_frames:
             canvas = create_dashboard_collage(last_frames)
             try:
-                rendering_queue.put_nowait((time.time(), canvas))
+                rendering_queue.put_nowait(canvas)
             except queue.Full:
                 pass
-        
-        global_telemetry["unique_count"] = len(unique_ids)
+                
         elapsed = time.time() - loop_start
-        actual_fps = 1.0 / elapsed if elapsed > 0 else target_fps
-        global_telemetry["fps"] = round(actual_fps, 1)
-        
+        with telemetry.lock:
+            telemetry.fps = round(1.0 / elapsed, 1) if elapsed > 0 else target_fps
+            
         time.sleep(max(0, frame_duration - elapsed))
 
 def _sync_compress(canvas_frame):
@@ -260,7 +314,7 @@ async def websocket_video_endpoint(websocket: WebSocket):
     
     while not shutdown_event.is_set():
         try:
-            _, canvas = rendering_queue.get(timeout=1.0)
+            canvas = rendering_queue.get(timeout=1.0)
             jpeg_bytes = await loop.run_in_executor(encoder_pool, _sync_compress, canvas)
             if jpeg_bytes:
                 await websocket.send_bytes(jpeg_bytes)
@@ -270,20 +324,36 @@ async def websocket_video_endpoint(websocket: WebSocket):
 @app.websocket("/ws/telemetry")
 async def ws_telemetry(websocket: WebSocket):
     await websocket.accept()
-    while not shutdown_event.is_set():
+    
+    async def receive_loop():
         try:
-            await websocket.send_json({
-                "telemetry": {
-                    "total_occupancy": global_telemetry["total_occupancy"],
-                    "unique_footfall": global_telemetry["unique_count"],
-                    "total_unique_people": global_telemetry["unique_count"],
-                    "target_color_count": global_telemetry["total_occupancy"],
-                    "system_fps": global_telemetry["fps"],
+            while not shutdown_event.is_set():
+                data = await websocket.receive_text()
+                msg = json.loads(data)
+                if "target_color" in msg:
+                    with telemetry.lock:
+                        telemetry.target_color = msg["target_color"]
+        except Exception:
+            pass
+            
+    rx_task = asyncio.create_task(receive_loop())
+    
+    try:
+        while not shutdown_event.is_set():
+            with telemetry.lock:
+                payload = {
+                    "telemetry": {
+                        "total_occupancy": telemetry.total_occupancy,
+                        "unique_footfall": telemetry.unique_count,
+                        "total_unique_people": telemetry.unique_count,
+                        "target_color_count": telemetry.target_color_count,
+                        "system_fps": telemetry.fps,
+                    }
                 }
-            })
+            await websocket.send_json(payload)
             await asyncio.sleep(1)
-        except WebSocketDisconnect:
-            break
+    except WebSocketDisconnect:
+        rx_task.cancel()
 
 @app.get("/")
 def get_dashboard():
@@ -301,11 +371,13 @@ async def lifespan(app: FastAPI):
     
     producers = []
     for cfg in camera_configs:
-        p = mp.Process(target=producer_worker, args=(cfg['id'], cfg['rtsp_url'], capture_queue, shutdown_event), daemon=True)
+        cam_queue = mp.Queue(maxsize=3)
+        camera_pipes[cfg['id']] = cam_queue
+        
+        p = mp.Process(target=camera_worker, args=(cfg['id'], cfg['rtsp_url'], cam_queue, shutdown_event), daemon=True)
         p.start()
         producers.append(p)
     
-    threading.Thread(target=processor_worker, args=(camera_configs,), daemon=True).start()
     threading.Thread(target=renderer_worker, daemon=True).start()
     
     yield
