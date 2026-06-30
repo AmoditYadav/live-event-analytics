@@ -473,21 +473,10 @@
             </div>
 
             <div class="video-wrap">
-                <video id="main-video" autoplay playsinline muted></video>
-
-                <div class="video-placeholder" id="video-placeholder">
-                    <div class="placeholder-spinner"></div>
-                    <div class="placeholder-text">Connecting to WebRTC Stream…</div>
-                    <div class="placeholder-sub">
-                        Negotiating WHEP with MediaMTX at <strong>localhost:8889</strong>.<br>
-                        Ensure MediaMTX is running and FFmpeg is pushing to <code>rtsp://localhost:8554/dashboard</code>.
-                    </div>
-                </div>
-
-                <div class="webrtc-state-badge" id="webrtc-error-badge">⚠ WebRTC failed — retrying…</div>
+                <img id="main-video" src="/video_feed" style="width: 100%; height: 100%; object-fit: contain; background: #000; border-radius: 6px;">
 
                 <div class="video-overlay-tl" id="video-timestamp">--:--:--</div>
-                <div class="video-overlay-tr">CAM 1–2 · NVENC H.264</div>
+                <div class="video-overlay-tr">CAM 1–2 · Direct MJPEG</div>
             </div>
 
             <div class="footer-bar">
@@ -586,64 +575,7 @@
     updateClock();
     setInterval(updateClock, 1000);
 
-    let pc;
-    let rtcRetryDelay = 3000;
-
-    function startWebRTC() {
-        if (pc) {
-            pc.close();
-            pc = null;
-        }
-
-        stateLabel.textContent = 'WebRTC · negotiating…';
-        errorBadge.className   = 'webrtc-state-badge';
-
-        pc = new RTCPeerConnection();
-
-        pc.ontrack = (event) => {
-            videoEl.srcObject = event.streams[0] || new MediaStream([event.track]);
-            placeholder.classList.add('hidden');
-            errorBadge.className   = 'webrtc-state-badge';
-            stateLabel.textContent = 'WebRTC · WHEP · MediaMTX';
-            rtcRetryDelay          = 3000;
-        };
-
-        pc.oniceconnectionstatechange = () => {
-            if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
-                placeholder.classList.remove('hidden');
-                errorBadge.className   = 'webrtc-state-badge error';
-                stateLabel.textContent = 'WebRTC · reconnecting…';
-                setTimeout(startWebRTC, rtcRetryDelay);
-                rtcRetryDelay = Math.min(rtcRetryDelay * 1.5, 20000);
-            }
-        };
-
-        pc.addTransceiver('video', { direction: 'recvonly' });
-
-        pc.createOffer()
-            .then(offer => pc.setLocalDescription(offer))
-            .then(() => fetch('/whep/dashboard', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/sdp' },
-                body: pc.localDescription.sdp,
-            }))
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`WHEP response ${response.status}`);
-                }
-                return response.text();
-            })
-            .then(sdp => pc.setRemoteDescription({ type: 'answer', sdp }))
-            .catch(() => {
-                placeholder.classList.remove('hidden');
-                errorBadge.className   = 'webrtc-state-badge error';
-                stateLabel.textContent = 'WebRTC · WHEP unreachable · retrying…';
-                setTimeout(startWebRTC, rtcRetryDelay);
-                rtcRetryDelay = Math.min(rtcRetryDelay * 1.5, 20000);
-            });
-    }
-
-    startWebRTC();
+    // Video feed is now handled automatically by the <img src="/video_feed"> tag above.
 </script>
 </body>
 </html>
