@@ -22,7 +22,6 @@ from core.video_stream import MultiCameraReader
 from core.detector import YOLODetector
 from core.tracker import EventTracker
 from core.color_filter import filter_by_clothing_color
-from core.webcam_api import fetch_openwebcam_streams
 from app.server import app, manager
 
 if not hasattr(np, 'long'):
@@ -131,19 +130,7 @@ def orchestrator_loop(loop):
     with open("config/config.yaml", "r") as f:
         config = yaml.safe_load(f)
     
-    openwebcam_cfg = config.get("openwebcamdb", {})
-    api_key = openwebcam_cfg.get("api_key", "")
-    limit = openwebcam_cfg.get("limit", 4)
-    fetched_urls = fetch_openwebcam_streams(api_key, limit)
-    camera_configs = [
-        {
-            "id": i,
-            "name": f"webcam_{i}",
-            "rtsp_url": url,
-            "line_zone": [[0, 360], [1280, 360]],
-        }
-        for i, url in enumerate(fetched_urls)
-    ]
+    camera_configs = config.get("cameras", [])
     
     ffmpeg_exe = resolve_ffmpeg(config.get("ffmpeg_path", "ffmpeg"))
     use_nvenc = probe_nvenc(ffmpeg_exe)

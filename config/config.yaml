@@ -1,12 +1,15 @@
-model:
-  engine_path: "weights/yolov8n.engine"
-  confidence_threshold: 0.30
-
-openwebcamdb:
-  api_key: "197|URDz8nUJ65Lhm5lWnRl67UVNKj4qEDQiQFhOJWT65f179f5e"
-  limit: 2
-
 analytics:
-  target_colors: ["red", "blue", "green"]
+  target_colors: ["red", "blue", "green", "black", "white"]
 
 ffmpeg_path: "ffmpeg"
+
+cameras:
+  - id: 1
+    name: "Jackson Hole Town Square"
+    rtsp_url: "https://www.youtube.com/watch?v=gFRtAAmiFbE"
+    line_zone: [[0, 360], [1280, 360]] 
+    
+  - id: 2
+    name: "Live Traffic Feed"
+    rtsp_url: "https://www.youtube.com/watch?v=DjdUEyjx8GM"
+    line_zone: [[0, 360], [1280, 360]]

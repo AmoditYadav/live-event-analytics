@@ -12,3 +12,4 @@ ac
 aiortc
 streamlink
 requests
+yt-dlp
