@@ -42,16 +42,22 @@ def create_dashboard_collage(frames, target_size=(640, 360)):
     elif n == 2:
         canvas[0:360, 0:640] = resized[0]
         canvas[0:360, 640:1280] = resized[1]
+        cv2.line(canvas, (640, 0), (640, 360), (220, 220, 220), 4)
     elif n == 3:
         canvas[0:360, 0:640] = resized[0]
         canvas[0:360, 640:1280] = resized[1]
         canvas[360:720, 0:640] = resized[2]
+        cv2.line(canvas, (640, 0), (640, 360), (220, 220, 220), 4)
+        cv2.line(canvas, (0, 360), (1280, 360), (220, 220, 220), 4)
     else:
         canvas[0:360, 0:640] = resized[0]
         canvas[0:360, 640:1280] = resized[1]
         canvas[360:720, 0:640] = resized[2]
         canvas[360:720, 640:1280] = resized[3]
+        cv2.line(canvas, (640, 0), (640, 720), (220, 220, 220), 4)
+        cv2.line(canvas, (0, 360), (1280, 360), (220, 220, 220), 4)
     return canvas
+
 
 def resolve_ffmpeg(config_path: str) -> str:
     if config_path and config_path != "ffmpeg" and os.path.isfile(config_path):
