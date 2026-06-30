@@ -10,3 +10,5 @@ gdown
 torchreid
 ac
 aiortc
+streamlink
+requests

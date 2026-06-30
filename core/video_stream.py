@@ -3,6 +3,7 @@ import threading
 import time
 from collections import deque
 import logging
+import streamlink
 
 class MultiCameraReader:
     def __init__(self, camera_configs, queue_size=1, reconnect_delay=5.0):
@@ -33,7 +34,17 @@ class MultiCameraReader:
         rtsp_url = cam['rtsp_url']
         
         while self.running:
-            cap = cv2.VideoCapture(rtsp_url)
+            try:
+                sl_streams = streamlink.streams(rtsp_url)
+                resolved_url = rtsp_url
+                if sl_streams:
+                    for quality in ("720p", "480p", "best"):
+                        if quality in sl_streams:
+                            resolved_url = sl_streams[quality].url
+                            break
+                cap = cv2.VideoCapture(resolved_url)
+            except Exception:
+                cap = cv2.VideoCapture(rtsp_url)
             
             # Reduce latency by setting buffer size if supported
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
