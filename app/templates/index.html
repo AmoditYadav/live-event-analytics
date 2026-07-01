@@ -3,585 +3,583 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Live Event Analytics Dashboard</title>
-    <meta name="description" content="Real-time crowd analytics: live WebRTC video, occupancy, Re-ID, and chokepoint footfall tracking.">
+    <title>Nexus Vision | AI Live Analytics</title>
+    <meta name="description" content="Real-time crowd analytics dashboard.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-dark:         #070d1a;
-            --bg-panel:        rgba(255,255,255,0.04);
-            --border:          rgba(255,255,255,0.09);
-            --border-bright:   rgba(99,179,237,0.35);
-            --text-primary:    #f0f4ff;
-            --text-secondary:  #8a9bc0;
-            --text-muted:      #4a5a78;
-            --accent-blue:     #38bdf8;
-            --accent-indigo:   #818cf8;
-            --accent-green:    #34d399;
-            --accent-amber:    #fbbf24;
-            --accent-red:      #f87171;
-            --radius-sm:  8px;
-            --radius-md: 14px;
-            --radius-lg: 20px;
+            --bg-base: #030712;
+            --bg-panel: rgba(17, 24, 39, 0.65);
+            --bg-panel-hover: rgba(31, 41, 55, 0.8);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --border-glow: rgba(56, 189, 248, 0.4);
+            --text-main: #f9fafb;
+            --text-dim: #9ca3af;
+            --accent: #0ea5e9;
+            --accent-glow: #38bdf8;
+            --accent-secondary: #8b5cf6;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
         }
 
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
         body {
-            font-family: 'Inter', sans-serif;
-            background: var(--bg-dark);
-            color: var(--text-primary);
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-main);
             min-height: 100vh;
+            overflow-x: hidden;
             display: flex;
             flex-direction: column;
-            overflow-x: hidden;
         }
 
+        /* Ambient Background */
         body::before {
             content: '';
             position: fixed;
-            inset: 0;
-            background-image:
-                linear-gradient(rgba(56,189,248,0.03) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(56,189,248,0.03) 1px, transparent 1px);
-            background-size: 60px 60px;
-            pointer-events: none;
-            z-index: 0;
+            top: -50%; left: -50%; width: 200%; height: 200%;
+            background: radial-gradient(circle at 50% 50%, rgba(14, 165, 233, 0.08), transparent 40%),
+                        radial-gradient(circle at 80% 20%, rgba(139, 92, 246, 0.08), transparent 30%);
+            z-index: -1;
+            animation: pulse-bg 15s ease-in-out infinite alternate;
         }
 
-        .app-wrapper {
-            position: relative;
-            z-index: 1;
-            display: flex;
-            flex-direction: column;
-            min-height: 100vh;
-            padding: 0 28px 28px;
+        @keyframes pulse-bg {
+            0% { transform: scale(1); }
+            100% { transform: scale(1.1); }
         }
 
-        .header {
+        /* Top Navigation */
+        .navbar {
             display: flex;
-            align-items: center;
             justify-content: space-between;
-            padding: 22px 0 18px;
-            border-bottom: 1px solid var(--border);
-            margin-bottom: 24px;
-            flex-wrap: wrap;
-            gap: 14px;
+            align-items: center;
+            padding: 20px 40px;
+            background: rgba(3, 7, 18, 0.5);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
 
-        .header-left {
+        .brand {
             display: flex;
             align-items: center;
-            gap: 14px;
+            gap: 16px;
         }
 
-        .logo-icon {
-            width: 42px;
-            height: 42px;
-            border-radius: 10px;
-            background: linear-gradient(135deg, #38bdf8, #818cf8);
+        .brand-logo {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 22px;
-            flex-shrink: 0;
-            box-shadow: 0 0 22px rgba(56,189,248,0.4);
+            font-size: 24px;
+            box-shadow: 0 0 20px rgba(14, 165, 233, 0.3);
         }
 
-        .header-titles h1 {
-            font-size: 22px;
-            font-weight: 800;
-            background: linear-gradient(90deg, #38bdf8, #818cf8);
+        .brand-text h1 {
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: linear-gradient(to right, #fff, #94a3b8);
             -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            line-height: 1.2;
+            color: transparent;
         }
-
-        .header-titles p {
+        
+        .brand-text p {
             font-size: 12px;
-            color: var(--text-muted);
+            color: var(--text-dim);
             font-weight: 500;
-            margin-top: 2px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 4px;
         }
 
-        .header-right {
+        .nav-controls {
             display: flex;
             align-items: center;
-            gap: 12px;
-            flex-wrap: wrap;
+            gap: 20px;
         }
 
+        /* Connection Badge */
         .status-badge {
             display: flex;
             align-items: center;
-            gap: 7px;
-            padding: 7px 14px;
-            border-radius: 100px;
-            font-size: 12px;
-            font-weight: 600;
-            border: 1px solid;
-            transition: all 0.3s ease;
-            white-space: nowrap;
-        }
-
-        .status-badge.connected    { background: rgba(52,211,153,0.1);  border-color: rgba(52,211,153,0.3);  color: #34d399; }
-        .status-badge.disconnected { background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.3); color: #f87171; }
-        .status-badge.connecting   { background: rgba(251,191,36,0.1);  border-color: rgba(251,191,36,0.3);  color: #fbbf24; }
-
-        .status-dot {
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background: currentColor;
-        }
-
-        .status-badge.connected .status-dot { animation: pulse-dot 2s infinite; }
-
-        @keyframes pulse-dot {
-            0%, 100% { opacity: 1; transform: scale(1);   }
-            50%       { opacity: 0.4; transform: scale(0.7); }
-        }
-
-        .filter-select-wrap { position: relative; }
-
-        .filter-select-wrap select {
-            appearance: none;
-            background: rgba(15,23,42,0.8);
-            border: 1px solid var(--border);
-            color: var(--text-primary);
-            padding: 8px 36px 8px 14px;
-            border-radius: var(--radius-sm);
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 30px;
             font-size: 13px;
             font-weight: 600;
-            font-family: 'Inter', sans-serif;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            color: var(--success);
+            transition: all 0.3s ease;
+        }
+        .status-badge.disconnected {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.2);
+            color: var(--danger);
+        }
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            box-shadow: 0 0 10px currentColor;
+            animation: pulse-dot 1.5s infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+        }
+
+        /* Color Filter Dropdown */
+        .filter-select {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 10px 20px;
+            border-radius: 12px;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 500;
             cursor: pointer;
-            transition: border-color 0.2s;
             outline: none;
+            transition: all 0.2s;
+            backdrop-filter: blur(10px);
+        }
+        .filter-select:hover {
+            border-color: var(--accent);
+            box-shadow: 0 0 15px rgba(14, 165, 233, 0.2);
+        }
+        .filter-select option {
+            background: var(--bg-base);
+            color: var(--text-main);
         }
 
-        .filter-select-wrap select:hover,
-        .filter-select-wrap select:focus { border-color: var(--border-bright); }
-
-        .filter-select-wrap::after {
-            content: '▾';
-            position: absolute;
-            right: 12px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: var(--text-secondary);
-            pointer-events: none;
-            font-size: 12px;
+        /* Main Layout */
+        .dashboard-container {
+            display: flex;
+            flex-direction: column;
+            padding: 30px 40px;
+            gap: 30px;
+            flex: 1;
         }
 
-        .stats-grid {
+        /* Stats Row */
+        .stats-row {
             display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 16px;
-            margin-bottom: 22px;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
         }
-
-        @media (max-width: 1100px) { .stats-grid { grid-template-columns: repeat(3, 1fr); } }
-        @media (max-width:  700px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
 
         .stat-card {
             background: var(--bg-panel);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-md);
-            padding: 20px 22px;
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
             position: relative;
             overflow: hidden;
-            transition: border-color 0.3s, transform 0.2s, box-shadow 0.3s;
+            transition: transform 0.3s, box-shadow 0.3s;
         }
-
-        .stat-card::before {
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.4);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+        .stat-card::after {
             content: '';
             position: absolute;
-            top: 0; left: 0; right: 0;
-            height: 2px;
-            background: linear-gradient(90deg, transparent, var(--card-accent, #38bdf8), transparent);
+            top: 0; left: 0; width: 100%; height: 2px;
+            background: linear-gradient(90deg, transparent, var(--card-color), transparent);
+            opacity: 0.7;
+        }
+
+        .stat-icon {
+            font-size: 24px;
+            width: 48px; height: 48px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .stat-info { display: flex; flex-direction: column; gap: 4px; }
+        .stat-label { font-size: 13px; color: var(--text-dim); font-weight: 500; text-transform: uppercase; letter-spacing: 1px; }
+        .stat-val { font-family: 'JetBrains Mono', monospace; font-size: 36px; font-weight: 700; color: #fff; line-height: 1; }
+        .stat-val.highlight { color: var(--card-color); text-shadow: 0 0 20px rgba(var(--card-color-rgb), 0.4); }
+
+        /* Video Section */
+        .video-section {
+            display: flex;
+            gap: 30px;
+            align-items: stretch;
+            height: calc(100vh - 350px);
+            min-height: 500px;
+        }
+
+        /* Stream Switcher Sidebar */
+        .stream-switcher {
+            width: 280px;
+            background: var(--bg-panel);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .switcher-title {
+            font-size: 14px;
+            color: var(--text-dim);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+            padding-left: 10px;
+        }
+
+        .stream-btn {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid transparent;
+            padding: 16px 20px;
+            border-radius: 16px;
+            color: var(--text-dim);
+            font-family: inherit;
+            font-size: 15px;
+            font-weight: 500;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .stream-btn:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+        }
+
+        .stream-btn.active {
+            background: rgba(14, 165, 233, 0.1);
+            border-color: rgba(14, 165, 233, 0.3);
+            color: var(--text-main);
+            box-shadow: 0 0 20px rgba(14, 165, 233, 0.1);
+        }
+
+        .stream-btn .status {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 10px var(--success);
             opacity: 0;
             transition: opacity 0.3s;
         }
 
-        .stat-card:hover           { border-color: rgba(255,255,255,0.15); transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
-        .stat-card:hover::before   { opacity: 1; }
-        .stat-card.active-data::before { opacity: 1; }
+        .stream-btn.active .status { opacity: 1; }
 
-        .stat-card--occupancy { --card-accent: #38bdf8; }
-        .stat-card--footfall  { --card-accent: #818cf8; }
-        .stat-card--people    { --card-accent: #34d399; }
-        .stat-card--targets   { --card-accent: #fbbf24; }
-        .stat-card--fps       { --card-accent: #f87171; }
-
-        .stat-icon   { font-size: 18px; margin-bottom: 12px; }
-        .stat-label  { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1.2px; font-weight: 700; margin-bottom: 6px; }
-        .stat-value  { font-size: 38px; font-weight: 900; line-height: 1; color: var(--text-primary); font-variant-numeric: tabular-nums; transition: color 0.4s; }
-        .stat-value.updating { color: var(--accent-blue); }
-        .stat-sublabel { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
-
-        .dashboard-layout {
-            display: flex;
-            gap: 18px;
+        /* Video Display Area */
+        .video-display {
             flex: 1;
-            min-height: 0;
-        }
-
-        .video-panel {
-            flex: 1;
-            background: var(--bg-panel);
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            position: relative;
-        }
-
-        .video-panel-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 14px 20px;
-            border-bottom: 1px solid var(--border);
-            flex-shrink: 0;
-        }
-
-        .video-panel-title {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 14px;
-            font-weight: 700;
-            color: var(--text-primary);
-        }
-
-        .live-pill {
-            background: rgba(248,113,113,0.15);
-            border: 1px solid rgba(248,113,113,0.35);
-            color: #f87171;
-            font-size: 10px;
-            font-weight: 800;
-            letter-spacing: 1.5px;
-            padding: 3px 8px;
-            border-radius: 100px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-
-        .live-dot {
-            width: 6px;
-            height: 6px;
-            background: #f87171;
-            border-radius: 50%;
-            animation: blink 1.2s infinite;
-        }
-
-        @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50%       { opacity: 0.2; }
-        }
-
-        .video-wrap {
-            flex: 1;
-            position: relative;
             background: #000;
+            border-radius: 24px;
+            border: 1px solid var(--border-color);
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
             display: flex;
             align-items: center;
             justify-content: center;
-            min-height: 420px;
+        }
+
+        .video-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            overflow: hidden; /* Important for zooming */
         }
 
         #main-video {
             width: 100%;
             height: 100%;
-            object-fit: contain;
+            object-fit: contain; /* Default for grid view */
+            transition: all 0.6s cubic-bezier(0.65, 0, 0.35, 1); /* Smooth zoom transition */
+            transform-origin: center center;
             display: block;
         }
 
-        .video-placeholder {
+        /* Native Backend View Routing (CSS zooming removed for high quality) */
+
+        /* Video Overlays */
+        .video-overlay-header {
+            position: absolute;
+            top: 20px; left: 20px; right: 20px;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .cam-title-badge {
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 8px 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s;
+        }
+
+        .timestamp-badge {
+            background: rgba(14, 165, 233, 0.15);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(14, 165, 233, 0.3);
+            padding: 8px 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--accent-glow);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .hud-overlay {
             position: absolute;
             inset: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 16px;
-            background: #000;
-            transition: opacity 0.4s;
+            pointer-events: none;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 24px;
+            box-shadow: inset 0 0 100px rgba(0,0,0,0.5);
+            z-index: 5;
         }
 
-        .video-placeholder.hidden { opacity: 0; pointer-events: none; }
-
-        .placeholder-spinner {
-            width: 44px;
-            height: 44px;
-            border: 3px solid rgba(56,189,248,0.15);
-            border-top-color: #38bdf8;
-            border-radius: 50%;
-            animation: spin 0.9s linear infinite;
-        }
-
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        .placeholder-text { font-size: 14px; font-weight: 600; color: var(--text-secondary); }
-        .placeholder-sub  { font-size: 12px; color: var(--text-muted); max-width: 300px; text-align: center; line-height: 1.6; }
-
-        .video-overlay-tl {
-            position: absolute;
-            top: 12px; left: 12px;
-            background: rgba(0,0,0,0.6);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 6px;
-            padding: 4px 10px;
-            font-size: 11px;
-            font-weight: 600;
-            color: rgba(255,255,255,0.7);
-            font-variant-numeric: tabular-nums;
-        }
-
-        .video-overlay-tr {
-            position: absolute;
-            top: 12px; right: 12px;
-            background: rgba(56,189,248,0.15);
-            border: 1px solid rgba(56,189,248,0.3);
-            border-radius: 6px;
-            padding: 4px 10px;
-            font-size: 11px;
-            font-weight: 700;
-            color: #38bdf8;
-        }
-
-        .webrtc-state-badge {
-            position: absolute;
-            bottom: 14px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 6px 16px;
-            border-radius: 100px;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-            display: none;
-            white-space: nowrap;
-        }
-
-        .webrtc-state-badge.error {
-            display: block;
-            background: rgba(248,113,113,0.12);
-            border: 1px solid rgba(248,113,113,0.35);
-            color: #f87171;
-        }
-
-        .footer-bar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 20px;
-            border-top: 1px solid var(--border);
-            font-size: 11px;
-            color: var(--text-muted);
-            flex-shrink: 0;
-        }
-
-        .footer-bar-left { display: flex; align-items: center; gap: 6px; }
     </style>
 </head>
 <body>
-<div class="app-wrapper">
 
-    <div class="header">
-        <div class="header-left">
-            <div class="logo-icon">📡</div>
-            <div class="header-titles">
-                <h1>Live Event Analytics</h1>
-                <p>Real-time crowd intelligence · YOLOv8m + ByteTrack + Re-ID · NVENC → RTSP → WebRTC</p>
+    <!-- Navbar -->
+    <nav class="navbar">
+        <div class="brand">
+            <div class="brand-logo">👁️</div>
+            <div class="brand-text">
+                <h1>Nexus Vision</h1>
+                <p>AI Surveillance & Analytics</p>
             </div>
         </div>
-        <div class="header-right">
-            <div class="status-badge connecting" id="ws-status-badge">
-                <div class="status-dot"></div>
-                <span id="ws-status-text">Connecting…</span>
-            </div>
-            <div class="filter-select-wrap">
-                <select id="color-filter" aria-label="Tracking focus color filter">
-                    <option value="all">🎯 Tracking Focus: All</option>
-                    <option value="red">🔴 Focus: Red</option>
-                    <option value="blue">🔵 Focus: Blue</option>
-                    <option value="green">🟢 Focus: Green</option>
-                    <option value="yellow">🟡 Focus: Yellow</option>
-                    <option value="orange">🟠 Focus: Orange</option>
-                    <option value="purple">🟣 Focus: Purple</option>
-                    <option value="pink">🩷 Focus: Pink</option>
-                    <option value="cyan">🩵 Focus: Cyan</option>
-                    <option value="white">⚪ Focus: White</option>
-                    <option value="black">⚫ Focus: Black</option>
-                    <option value="grey">🩶 Focus: Grey</option>
-                    <option value="brown">🟤 Focus: Brown</option>
-                </select>
+        <div class="nav-controls">
+            <select class="filter-select" id="color-filter">
+                <option value="all">🎯 Tracking Focus: All</option>
+                <option value="red">🔴 Focus: Red</option>
+                <option value="blue">🔵 Focus: Blue</option>
+                <option value="green">🟢 Focus: Green</option>
+                <option value="black">⚫ Focus: Black</option>
+                <option value="white">⚪ Focus: White</option>
+            </select>
+            <div class="status-badge" id="ws-status">
+                <div class="dot"></div>
+                <span id="ws-text">Connected</span>
             </div>
         </div>
-    </div>
+    </nav>
 
-    <div class="stats-grid">
-        <div class="stat-card stat-card--occupancy" id="card-occupancy">
-            <div class="stat-icon">👥</div>
-            <div class="stat-label">Live Occupancy</div>
-            <div class="stat-value" id="val-occupancy">—</div>
-            <div class="stat-sublabel">People currently in frame</div>
+    <!-- Main Dashboard -->
+    <main class="dashboard-container">
+        
+        <!-- Stats Row -->
+        <div class="stats-row" id="stats-container">
+            <div class="stat-card" style="--card-color: #f87171; --card-color-rgb: 248, 113, 113;" id="total-stat-card">
+                <div class="stat-icon">👥</div>
+                <div class="stat-info">
+                    <span class="stat-label">Total / Targets</span>
+                    <span class="stat-val highlight" id="val-total">0 / 0</span>
+                </div>
+            </div>
         </div>
-        <div class="stat-card stat-card--footfall" id="card-footfall">
-            <div class="stat-icon">🚶</div>
-            <div class="stat-label">Chokepoint Footfall</div>
-            <div class="stat-value" id="val-footfall">—</div>
-            <div class="stat-sublabel">Zone crossings tracked</div>
-        </div>
-        <div class="stat-card stat-card--people" id="card-people">
-            <div class="stat-icon">🪪</div>
-            <div class="stat-label">People Identified</div>
-            <div class="stat-value" id="val-unique-people">—</div>
-            <div class="stat-sublabel">Unique Re-ID matches</div>
-        </div>
-        <div class="stat-card stat-card--targets" id="card-targets">
-            <div class="stat-icon">🎯</div>
-            <div class="stat-label" id="label-target-count">Targets Tracked</div>
-            <div class="stat-value" id="val-target-count">—</div>
-            <div class="stat-sublabel">Filtered by color focus</div>
-        </div>
-        <div class="stat-card stat-card--fps" id="card-fps">
-            <div class="stat-icon">⚡</div>
-            <div class="stat-label">Pipeline Throughput</div>
-            <div class="stat-value" id="val-fps">— <span style="font-size:18px;font-weight:600;">FPS</span></div>
-            <div class="stat-sublabel">System processing rate</div>
-        </div>
-    </div>
 
-    <div class="dashboard-layout">
-        <div class="video-panel">
-            <div class="video-panel-header">
-                <div class="video-panel-title">
-                    <span>📹</span>
-                    <span>Annotated Live Feed</span>
-                    <div class="live-pill">
-                        <div class="live-dot"></div>
-                        LIVE
+        <!-- Video & Controls -->
+        <div class="video-section">
+            
+            <!-- Stream Switcher -->
+            <aside class="stream-switcher" id="stream-switcher">
+                <div class="switcher-title">Camera Feeds</div>
+                <button class="stream-btn active" data-view="grid" onclick="switchView('grid', 'MULTI-CAM GRID', this)">
+                    <span>Grid View (All)</span>
+                    <div class="status"></div>
+                </button>
+            </aside>
+
+            <!-- Video Display -->
+            <div class="video-display">
+                <div class="video-overlay-header">
+                    <div class="cam-title-badge" id="current-view-title">
+                        <div class="dot" style="background:#ef4444; box-shadow:0 0 8px #ef4444;"></div>
+                        MULTI-CAM GRID
                     </div>
+                    <div class="timestamp-badge" id="clock">00:00:00</div>
                 </div>
-                <div style="font-size:12px;color:var(--text-muted);" id="webrtc-state-label">WebRTC · WHEP · MediaMTX</div>
-            </div>
-
-            <div class="video-wrap">
-                <img id="videoFeed" style="width: 100%; height: auto; min-height: 720px; object-fit: contain; border: none; background-color: #000;">
-
-                <div class="video-overlay-tl" id="video-timestamp">--:--:--</div>
-                <div class="video-overlay-tr">CAM 1–2 · Direct MJPEG</div>
-            </div>
-
-            <div class="footer-bar">
-                <div class="footer-bar-left">
-                    <span>🖥</span>
-                    <span id="footer-stream-info">WebRTC · initializing</span>
+                
+                <div class="video-container view-grid" id="video-container">
+                    <img id="main-video" src="" alt="Connecting to feed...">
                 </div>
-                <span id="footer-time">—</span>
+
+                <div class="hud-overlay"></div>
             </div>
+
         </div>
-    </div>
+    </main>
 
-</div>
-<script>
-    const wsStatusBadge  = document.getElementById('ws-status-badge');
-    const wsStatusText   = document.getElementById('ws-status-text');
-    const occEl          = document.getElementById('val-occupancy');
-    const footfallEl     = document.getElementById('val-footfall');
-    const uniqueEl       = document.getElementById('val-unique-people');
-    const targetEl       = document.getElementById('val-target-count');
-    const targetLabel    = document.getElementById('label-target-count');
-    const fpsEl          = document.getElementById('val-fps');
-    const footerInfo     = document.getElementById('footer-stream-info');
-    const footerTime     = document.getElementById('footer-time');
-    const placeholder    = document.getElementById('video-placeholder');
-    const errorBadge     = document.getElementById('webrtc-error-badge');
-    const stateLabel     = document.getElementById('webrtc-state-label');
-    const videoEl        = document.getElementById('main-video');
-    const tsEl           = document.getElementById('video-timestamp');
-
-    let ws;
-    let wsRetryDelay = 2000;
-
-    function setWsStatus(state) {
-        wsStatusBadge.className = 'status-badge ' + state;
-        wsStatusText.textContent = { connected: 'Live', disconnected: 'Disconnected', connecting: 'Connecting…' }[state];
-    }
-
-    function flashCard(el) {
-        el.classList.add('updating');
-        setTimeout(() => el.classList.remove('updating'), 400);
-    }
-
-    function connectWS() {
-        setWsStatus('connecting');
-        ws = new WebSocket(`ws://${location.host}/ws/telemetry`);
-
-        ws.onopen = () => {
-            setWsStatus('connected');
-            wsRetryDelay = 2000;
-        };
-
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.telemetry) {
-                const t = data.telemetry;
-                occEl.textContent      = t.total_occupancy    ?? '—';
-                footfallEl.textContent = t.unique_footfall     ?? '—';
-                uniqueEl.textContent   = t.total_unique_people ?? '—';
-                targetEl.textContent   = t.target_color_count  ?? '—';
-                const fps = t.system_fps ?? null;
-                fpsEl.innerHTML = fps !== null
-                    ? `${fps} <span style="font-size:18px;font-weight:600;">FPS</span>`
-                    : `— <span style="font-size:18px;font-weight:600;">FPS</span>`;
-                [occEl, footfallEl, uniqueEl, targetEl, fpsEl].forEach(flashCard);
-                ['card-occupancy','card-footfall','card-people','card-targets','card-fps']
-                    .forEach(id => document.getElementById(id).classList.add('active-data'));
-                footerInfo.textContent = `WebRTC live · ${t.system_fps ?? '?'} FPS`;
-            }
-        };
-
-        ws.onclose = ws.onerror = () => {
-            setWsStatus('disconnected');
-            setTimeout(connectWS, wsRetryDelay);
-            wsRetryDelay = Math.min(wsRetryDelay * 1.5, 15000);
-        };
-    }
-
-    connectWS();
-
-    document.getElementById('color-filter').addEventListener('change', (e) => {
-        const val = e.target.value;
-        targetLabel.textContent = val === 'all'
-            ? 'Targets Tracked'
-            : `${val.charAt(0).toUpperCase() + val.slice(1)} Targets`;
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ target_color: val }));
+    <script>
+        // --- WebSockets ---
+        const wsStatus = document.getElementById('ws-status');
+        const wsText = document.getElementById('ws-text');
+        let telemetryWs = null;
+        
+        function updateConnStatus(status) {
+            wsStatus.className = 'status-badge ' + status;
+            wsText.innerText = status === 'connected' ? 'Live Connected' : 'Reconnecting...';
         }
-    });
 
-    function updateClock() {
-        const now = new Date();
-        tsEl.textContent       = now.toLocaleTimeString('en-US', { hour12: false });
-        footerTime.textContent = now.toLocaleString();
-    }
-    updateClock();
-    setInterval(updateClock, 1000);
+        function connectTelemetry() {
+            updateConnStatus('connecting');
+            telemetryWs = new WebSocket(`ws://${location.host}/ws/telemetry`);
+            
+            telemetryWs.onopen = () => updateConnStatus('connected');
+            telemetryWs.onclose = () => { updateConnStatus('disconnected'); setTimeout(connectTelemetry, 3000); };
+            
+            telemetryWs.onmessage = (e) => {
+                const data = JSON.parse(e.data);
+                if (data.telemetry) {
+                    const t = data.telemetry;
+                    
+                    if (t.cam_stats && window.cameraList && window.cameraList.length > 0) {
+                        window.cameraList.forEach(cam => {
+                            const el = document.getElementById(`val-cam${cam.id}`);
+                            if (el) {
+                                const stats = t.cam_stats[String(cam.id)] || t.cam_stats[`cam${cam.id}`] || { occupancy: 0, targets: 0 };
+                                el.innerText = `${stats.occupancy} / ${stats.targets}`;
+                            }
+                        });
+                    }
+                    
+                    document.getElementById('val-total').innerText = `${t.total_occupancy ?? 0} / ${t.target_color_count ?? 0}`;
+                }
+            };
 
-    const videoFeed = document.getElementById('videoFeed');
-    const wsVideo = new WebSocket('ws://' + window.location.host + '/ws/video');
-    wsVideo.binaryType = 'blob';
-    wsVideo.onmessage = function(event) {
-        const url = URL.createObjectURL(event.data);
-        videoFeed.src = url;
-        videoFeed.onload = () => URL.revokeObjectURL(url);
-    };</script>
+            document.getElementById('color-filter').addEventListener('change', (e) => {
+                const val = e.target.value;
+                document.getElementById('label-targets').innerText = val === 'all' ? 'Target Matches' : `${val.toUpperCase()} Targets`;
+                if(telemetryWs && telemetryWs.readyState === WebSocket.OPEN) {
+                    telemetryWs.send(JSON.stringify({ target_color: val }));
+                }
+            });
+        }
+        
+        connectTelemetry();
+
+        // Video Feed
+        const videoEl = document.getElementById('main-video');
+        const wsVideo = new WebSocket(`ws://${location.host}/ws/video`);
+        wsVideo.binaryType = 'blob';
+        wsVideo.onmessage = (e) => {
+            const url = URL.createObjectURL(e.data);
+            videoEl.src = url;
+            videoEl.onload = () => URL.revokeObjectURL(url);
+        };
+
+        // --- Stream Switching Logic ---
+        const videoContainer = document.getElementById('video-container');
+        const titleBadge = document.getElementById('current-view-title');
+        window.cameraList = [];
+
+        function switchView(view, title, btnElement) {
+            document.querySelectorAll('.stream-btn').forEach(b => b.classList.remove('active'));
+            if (btnElement) {
+                btnElement.classList.add('active');
+            } else {
+                document.querySelector('[data-view="grid"]').classList.add('active');
+            }
+            
+            if (telemetryWs && telemetryWs.readyState === WebSocket.OPEN) {
+                telemetryWs.send(JSON.stringify({ view_mode: view }));
+            }
+            
+            titleBadge.innerHTML = `<div class="dot" style="background:#ef4444; box-shadow:0 0 8px #ef4444;"></div>${title}`;
+        }
+
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/config');
+                const config = await res.json();
+                window.cameraList = config.cameras || [];
+                
+                const switcher = document.getElementById('stream-switcher');
+                const statsContainer = document.getElementById('stats-container');
+                const totalCard = document.getElementById('total-stat-card');
+                
+                const colors = [
+                    { hex: '#38bdf8', rgb: '56, 189, 248' },
+                    { hex: '#818cf8', rgb: '129, 140, 248' },
+                    { hex: '#34d399', rgb: '52, 211, 153' },
+                    { hex: '#fbbf24', rgb: '251, 191, 36' },
+                    { hex: '#f472b6', rgb: '244, 114, 182' },
+                    { hex: '#a78bfa', rgb: '167, 139, 250' }
+                ];
+                
+                window.cameraList.forEach((cam, idx) => {
+                    const btn = document.createElement('button');
+                    btn.className = 'stream-btn';
+                    btn.dataset.view = `cam${cam.id}`;
+                    btn.innerHTML = `<span>CAM ${cam.id}: ${cam.name || 'Camera'}</span><div class="status"></div>`;
+                    btn.onclick = () => switchView(`cam${cam.id}`, `CAM ${cam.id}: ${(cam.name || 'CAMERA').toUpperCase()}`, btn);
+                    switcher.appendChild(btn);
+                    
+                    const color = colors[idx % colors.length];
+                    const card = document.createElement('div');
+                    card.className = 'stat-card';
+                    card.style.setProperty('--card-color', color.hex);
+                    card.style.setProperty('--card-color-rgb', color.rgb);
+                    card.innerHTML = `
+                        <div class="stat-icon">📷</div>
+                        <div class="stat-info">
+                            <span class="stat-label">Cam ${cam.id} (${cam.name || 'Stats'})</span>
+                            <span class="stat-val highlight" id="val-cam${cam.id}">0 / 0</span>
+                        </div>
+                    `;
+                    statsContainer.insertBefore(card, totalCard);
+                });
+                
+            } catch (err) {
+                console.error('Failed to load config', err);
+            }
+        }
+        
+        loadConfig();
+
+        // --- Clock ---
+        setInterval(() => {
+            document.getElementById('clock').innerText = new Date().toLocaleTimeString('en-US', {hour12: false});
+        }, 1000);
+
+    </script>
 </body>
 </html>

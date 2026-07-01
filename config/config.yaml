@@ -13,3 +13,15 @@ cameras:
     name: "Live Traffic Feed"
     rtsp_url: "https://www.youtube.com/watch?v=DjdUEyjx8GM"
     line_zone: [[0, 360], [1280, 360]]
+
+  - id: 3
+    name: "Dublin- Ireland"
+    rtsp_url: "https://www.youtube.com/live/3nyPER2kzqk?si=EnQu2nMpQttkiMtr"
+    line_zone: [[0, 360], [1280, 360]]
+
+  - id: 4
+    name: "Davao City"
+    rtsp_url: "https://www.youtube.com/live/UJxvgeRnuUQ?si=HVZrJlPGuQ2uOQnS"
+    line_zone: [[0, 360], [1280, 360]]
+
+  

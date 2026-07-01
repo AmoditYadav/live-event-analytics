@@ -34,6 +34,8 @@ class TelemetryState:
         self.fps = 30.0
         self.target_color = "all"
         self.target_color_count = 0
+        self.view_mode = "grid"
+        self.per_cam_stats = {}
 
 telemetry = TelemetryState()
 
@@ -76,6 +78,7 @@ class SimpleTracker:
                     track['confidence'] = det[4]
                     track['class_id'] = det[5]
                     track['class_name'] = det[6]
+                    track['color_name'] = det[7]
                     track['hits_since_update'] = 0
                     track['hit_streak'] += 1
                     matched_tracks.append(track)
@@ -88,6 +91,7 @@ class SimpleTracker:
                 'confidence': det[4],
                 'class_id': det[5],
                 'class_name': det[6],
+                'color_name': det[7],
                 'age': 0,
                 'hit_streak': 1,
                 'hits_since_update': 0
@@ -185,31 +189,30 @@ def camera_worker(cam_id, url, out_queue, evt_shutdown):
                         confidence = float(box.conf[0].cpu().numpy())
                         class_id = int(box.cls[0].cpu().numpy())
                         class_name = class_names[class_id]
+                        
+                        color_name = "unknown"
                         if class_name == "person":
-                            detections.append([x1, y1, x2, y2, confidence, class_id, class_name])
+                            h_box = int(y2 - y1)
+                            w_box = int(x2 - x1)
+                            y_start = max(0, int(y1 + h_box * 0.2))
+                            y_end = min(frame.shape[0], int(y1 + h_box * 0.6))
+                            x_start = max(0, int(x1 + w_box * 0.25))
+                            x_end = min(frame.shape[1], int(x2 - w_box * 0.25))
+                            crop = frame[y_start:y_end, x_start:x_end]
+                            if crop.size > 0 and crop.shape[0] >= 2 and crop.shape[1] >= 2:
+                                hsv_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+                                mean_color = cv2.mean(hsv_crop)
+                                color_name = classify_color(mean_color[0], mean_color[1], mean_color[2])
+                                
+                            detections.append([x1, y1, x2, y2, confidence, class_id, class_name, color_name])
                         
             try:
-                out_queue.put((frame, detections), timeout=0.1)
+                out_queue.put((frame, detections), timeout=2.0)
             except queue.Full:
                 pass
         else:
             cap = None
             time.sleep(1)
-
-def normalize_lighting(crop):
-    lab = cv2.cvtColor(crop, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
-    cl = clahe.apply(l)
-    limg = cv2.merge((cl, a, b))
-    return cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
-
-def remove_skin(crop):
-    ycrcb = cv2.cvtColor(crop, cv2.COLOR_BGR2YCrCb)
-    lower = np.array([0, 133, 77], dtype=np.uint8)
-    upper = np.array([255, 173, 127], dtype=np.uint8)
-    skin_mask = cv2.inRange(ycrcb, lower, upper)
-    return cv2.bitwise_not(skin_mask)
 
 def classify_color(h, s, v):
     if v < 40: return "black"
@@ -222,60 +225,11 @@ def classify_color(h, s, v):
     if h < 22: return "orange"
     if h < 35: return "yellow"
     if h < 85: return "green"
-    if h < 100: return "cyan"
-    if h < 135: return "blue"
+    if h < 130: return "blue"
     if h < 160: return "purple"
     return "pink"
 
-def get_track_color_data(frame, track):
-    x1, y1, x2, y2 = map(int, track['bbox'])
-    
-    h_box = y2 - y1
-    w_box = x2 - x1
-    y_start = max(0, int(y1 + h_box * 0.22))
-    y_end = min(frame.shape[0], int(y1 + h_box * 0.58))
-    x_start = max(0, int(x1 + w_box * 0.30))
-    x_end = min(frame.shape[1], int(x2 - w_box * 0.30))
-    
-    crop = frame[y_start:y_end, x_start:x_end]
-    if crop.size == 0 or crop.shape[0] < 2 or crop.shape[1] < 2:
-        return "unknown", 0.0
-        
-    crop_norm = normalize_lighting(crop)
-    non_skin_mask = remove_skin(crop_norm)
-    
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    non_skin_mask = cv2.morphologyEx(non_skin_mask, cv2.MORPH_OPEN, kernel)
-    non_skin_mask = cv2.morphologyEx(non_skin_mask, cv2.MORPH_CLOSE, kernel)
-    
-    valid_pixels = crop_norm[non_skin_mask == 255]
-    if len(valid_pixels) < 10:
-        return "unknown", 0.0
-        
-    pixels = np.float32(valid_pixels)
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-    
-    k = min(3, len(pixels))
-    _, labels, centers = cv2.kmeans(pixels, k, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
-    
-    counts = np.bincount(labels.flatten())
-    largest_cluster_idx = np.argmax(counts)
-    dominant_bgr = centers[largest_cluster_idx]
-    
-    cluster_ratio = counts[largest_cluster_idx] / len(pixels)
-    valid_ratio = len(pixels) / (crop.shape[0] * crop.shape[1])
-    
-    dominant_bgr_img = np.uint8([[dominant_bgr]])
-    dominant_hsv = cv2.cvtColor(dominant_bgr_img, cv2.COLOR_BGR2HSV)[0][0]
-    h, s, v = dominant_hsv
-    
-    color_name = classify_color(h, s, v)
-    
-    saturation_score = (s / 255.0) if color_name not in ["black", "white", "grey"] else 1.0
-    confidence = (cluster_ratio * 0.5) + (valid_ratio * 0.3) + (saturation_score * 0.2)
-    confidence = float(np.clip(confidence, 0.0, 1.0))
-    
-    return color_name, confidence
+
 
 def renderer_worker():
     last_frames = {}
@@ -294,6 +248,7 @@ def renderer_worker():
         
         with telemetry.lock:
             current_target = telemetry.target_color
+            current_view = telemetry.view_mode
             
         for cam_id, q in camera_pipes.items():
             if cam_id not in trackers:
@@ -315,26 +270,21 @@ def renderer_worker():
                     cam_occupancy += 1
                     
                     if tid not in color_memory:
-                        color_memory[tid] = {"history": [], "last_update": -5, "stable_color": "unknown"}
+                        color_memory[tid] = {"history": [], "stable_color": "unknown"}
                         
-                    if frame_counts[cam_id] - color_memory[tid]["last_update"] >= 5:
-                        color_name, conf = get_track_color_data(frame, track)
-                        if color_name != "unknown":
-                            history = color_memory[tid]["history"]
-                            history.append((color_name, conf, time.time()))
-                            if len(history) > 15:
-                                history.pop(0)
-                                
-                            color_scores = defaultdict(float)
-                            for c_name, c_conf, _ in history:
-                                color_scores[c_name] += c_conf
+                    color_name = track.get('color_name', 'unknown')
+                    if color_name != "unknown":
+                        history = color_memory[tid]["history"]
+                        history.append(color_name)
+                        if len(history) > 15:
+                            history.pop(0)
                             
-                            if color_scores:
-                                best_color = max(color_scores.items(), key=lambda x: x[1])[0]
-                                color_memory[tid]["stable_color"] = best_color
-                                
-                        color_memory[tid]["last_update"] = frame_counts[cam_id]
-                        
+                        color_counts = {}
+                        for c in history:
+                            color_counts[c] = color_counts.get(c, 0) + 1
+                        if color_counts:
+                            color_memory[tid]["stable_color"] = max(color_counts, key=color_counts.get)
+                            
                     stable_color = color_memory[tid]["stable_color"]
                     
                     if current_target != "all" and stable_color != current_target:
@@ -365,11 +315,20 @@ def renderer_worker():
             telemetry.total_occupancy = total_occupancy
             telemetry.unique_count = len(unique_ids)
             telemetry.target_color_count = total_target_count if current_target != "all" else total_occupancy
+            telemetry.per_cam_stats = last_stats.copy()
             
         if last_frames:
-            canvas = create_dashboard_collage(last_frames)
+            if current_view == "grid":
+                canvas = create_dashboard_collage(last_frames)
+            else:
+                cam_num = int(current_view.replace("cam", ""))
+                if cam_num in last_frames:
+                    canvas = cv2.resize(last_frames[cam_num], (1280, 720))
+                else:
+                    canvas = create_dashboard_collage(last_frames)
+                    
             try:
-                rendering_queue.put_nowait(canvas)
+                rendering_queue.put(canvas, timeout=1.0)
             except queue.Full:
                 pass
                 
@@ -388,14 +347,19 @@ async def websocket_video_endpoint(websocket: WebSocket):
     await websocket.accept()
     loop = asyncio.get_event_loop()
     
-    while not shutdown_event.is_set():
-        try:
-            canvas = rendering_queue.get(timeout=1.0)
-            jpeg_bytes = await loop.run_in_executor(encoder_pool, _sync_compress, canvas)
-            if jpeg_bytes:
-                await websocket.send_bytes(jpeg_bytes)
-        except queue.Empty:
-            continue
+    try:
+        while not shutdown_event.is_set():
+            try:
+                canvas = rendering_queue.get(timeout=1.0)
+                jpeg_bytes = await loop.run_in_executor(encoder_pool, _sync_compress, canvas)
+                if jpeg_bytes:
+                    await websocket.send_bytes(jpeg_bytes)
+            except queue.Empty:
+                continue
+    except (WebSocketDisconnect, ConnectionAbortedError):
+        pass
+    except Exception:
+        pass
 
 @app.websocket("/ws/telemetry")
 async def ws_telemetry(websocket: WebSocket):
@@ -409,6 +373,9 @@ async def ws_telemetry(websocket: WebSocket):
                 if "target_color" in msg:
                     with telemetry.lock:
                         telemetry.target_color = msg["target_color"]
+                if "view_mode" in msg:
+                    with telemetry.lock:
+                        telemetry.view_mode = msg["view_mode"]
         except Exception:
             pass
             
@@ -417,6 +384,13 @@ async def ws_telemetry(websocket: WebSocket):
     try:
         while not shutdown_event.is_set():
             with telemetry.lock:
+                cam_stats = {}
+                for cid, stats in telemetry.per_cam_stats.items():
+                    cam_stats[str(cid)] = {
+                        "occupancy": stats[0],
+                        "targets": stats[1] if telemetry.target_color != "all" else stats[0]
+                    }
+                
                 payload = {
                     "telemetry": {
                         "total_occupancy": telemetry.total_occupancy,
@@ -424,6 +398,7 @@ async def ws_telemetry(websocket: WebSocket):
                         "total_unique_people": telemetry.unique_count,
                         "target_color_count": telemetry.target_color_count,
                         "system_fps": telemetry.fps,
+                        "cam_stats": cam_stats
                     }
                 }
             await websocket.send_json(payload)
@@ -437,6 +412,12 @@ def get_dashboard():
         html_content = f.read()
     return HTMLResponse(content=html_content)
 
+@app.get("/api/config")
+def get_config():
+    with open("config/config.yaml", "r") as f:
+        config = yaml.safe_load(f)
+    return config
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     with open("config/config.yaml", "r") as f:
@@ -447,7 +428,7 @@ async def lifespan(app: FastAPI):
     
     producers = []
     for cfg in camera_configs:
-        cam_queue = mp.Queue(maxsize=3)
+        cam_queue = mp.Queue(maxsize=30)
         camera_pipes[cfg['id']] = cam_queue
         
         p = mp.Process(target=camera_worker, args=(cfg['id'], cfg['rtsp_url'], cam_queue, shutdown_event), daemon=True)
